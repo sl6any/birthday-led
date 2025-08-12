@@ -1,158 +1,213 @@
-<script>
-  const TEXT = "HAPPY BIRTHDAY TO ME!!"; 
-  let SPEED = 120;       
-  const DIRECTION = 1;   // 1 = left→right
-  const DOT_GAP = 6;     
-  const DOT_SIZE = 2;    
-  const LOOP_GAP = 80;   
-  const REPEL_RADIUS = 90; 
-  const REPEL_PUSH = 28;   
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Happy Birthday To Me!!</title>
+  <meta name="description" content="LED-style scrolling birthday message with music." />
+  <style>
+    html, body { margin: 0; height: 100%; background:#000; overflow: hidden; }
+    canvas { display:block; width:100vw; height:100vh; }
+    #ui {
+      position: fixed; inset: 0; display:flex; align-items:center; justify-content:center;
+      flex-direction:column; gap:12px; background:rgba(0,0,0,.92); color:#fff;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+    #ui button { padding:10px 18px; font-size:16px; cursor:pointer; }
+    #hud {
+      position: fixed; right:12px; bottom:12px; display:flex; gap:8px;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+    #hud button { padding:6px 10px; font-size:14px; cursor:pointer; opacity:.85 }
+  </style>
+</head>
+<body>
+  <div id="ui">
+    <h1>Happy Birthday To Me!!</h1>
+    <p>Click Start to play music and start the banner.</p>
+    <button id="startBtn">Start</button>
+  </div>
 
-  const canvas = document.getElementById('c');
-  const ctx = canvas.getContext('2d');
-  const music = document.getElementById('music');
+  <canvas id="c"></canvas>
+  <div id="hud" hidden>
+    <button id="toggleSound">Mute</button>
+    <button id="faster">Faster</button>
+    <button id="slower">Slower</button>
+  </div>
+  <audio id="music" src="assets/music.mp3" loop></audio>
 
-  let W = 0, H = 0, DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  <script>
+    // --------- Tweakables (top of file) ----------
+    const TEXT = "HAPPY BIRTHDAY TO ME!!"; // banner text
+    let SPEED = 120;       // pixels/second (use the buttons to adjust live)
+    const DIRECTION = 1;   // 1 = left→right, -1 = right→left  <<< only change
+    const DOT_GAP = 6;     // sampling gap (smaller = denser)
+    const DOT_SIZE = 2;    // visual dot radius
+    const LOOP_GAP = 80;   // blank space between repeated messages
+    const REPEL_RADIUS = 90; // px around pointer
+    const REPEL_PUSH = 28;   // how far dots are pushed
+    // ---------------------------------------------
 
-  let mapCanvas = document.createElement('canvas');
-  let mapCtx = mapCanvas.getContext('2d', { willReadFrequently: true });
-  let dots = [];
-  let mapW = 0, mapH = 0;
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+    const music = document.getElementById('music');
 
-  let scrollX = 0;
-  let last = performance.now();
+    let W = 0, H = 0, DPR = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
 
-  const mouse = { x: -9999, y: -9999, active: false };
+    // Offscreen text map
+    let mapCanvas = document.createElement('canvas');
+    let mapCtx = mapCanvas.getContext('2d', { willReadFrequently: true });
+    let dots = [];       // [{x,y,h}] positions relative to the text map
+    let mapW = 0, mapH = 0;
 
-  function fitCanvas() {
-    W = canvas.width  = Math.floor(window.innerWidth  * DPR);
-    H = canvas.height = Math.floor(window.innerHeight * DPR);
-    canvas.style.width = '100vw';
-    canvas.style.height = '100vh';
-    buildTextMap();
-  }
+    // Scrolling state
+    let scrollX = 0;
+    let last = performance.now();
 
-  function fontSizeForWidth() {
-    const px = Math.max(48, Math.min(160, window.innerWidth * 0.12));
-    return Math.floor(px * DPR);
-  }
+    // Pointer state
+    const mouse = { x: -9999, y: -9999, active: false };
 
-  function buildTextMap() {
-    const fs = fontSizeForWidth();
-    mapCtx.font = `bold ${fs}px Arial, Helvetica, sans-serif`;
-    const m = mapCtx.measureText(TEXT);
-    mapW = Math.ceil(m.width + 40 * DPR);
-    mapH = Math.ceil(fs + 40 * DPR);
-    mapCanvas.width = mapW;
-    mapCanvas.height = mapH;
+    function fitCanvas() {
+      W = canvas.width  = Math.floor(window.innerWidth  * DPR);
+      H = canvas.height = Math.floor(window.innerHeight * DPR);
+      canvas.style.width = '100vw';
+      canvas.style.height = '100vh';
+      buildTextMap();
+    }
 
-    mapCtx.clearRect(0, 0, mapW, mapH);
-    mapCtx.fillStyle = '#fff';
-    mapCtx.textBaseline = 'middle';
-    mapCtx.textAlign = 'left';
-    mapCtx.font = `bold ${fs}px Arial, Helvetica, sans-serif`;
-    mapCtx.fillText(TEXT, 20 * DPR, mapH / 2);
+    function fontSizeForWidth() {
+      // responsive font size, capped for small/large screens
+      const px = Math.max(48, Math.min(160, window.innerWidth * 0.12));
+      return Math.floor(px * DPR);
+    }
 
-    const step = Math.max(2, Math.floor(DOT_GAP * DPR));
-    const img = mapCtx.getImageData(0, 0, mapW, mapH).data;
+    function buildTextMap() {
+      // Build an alpha map of the text, then sample it into dots[]
+      const fs = fontSizeForWidth();
+      mapCtx.font = `bold ${fs}px Arial, Helvetica, sans-serif`;
+      const m = mapCtx.measureText(TEXT);
+      mapW = Math.ceil(m.width + 40 * DPR);
+      mapH = Math.ceil(fs + 40 * DPR);
+      mapCanvas.width = mapW;
+      mapCanvas.height = mapH;
 
-    dots = [];
-    for (let y = 0; y < mapH; y += step) {
-      for (let x = 0; x < mapW; x += step) {
-        const a = img[(y * mapW + x) * 4 + 3];
-        if (a > 128) {
-          const h = (x / mapW) * 360;
-          dots.push({ x, y, h });
+      mapCtx.clearRect(0, 0, mapW, mapH);
+      mapCtx.fillStyle = '#fff';
+      mapCtx.textBaseline = 'middle';
+      mapCtx.textAlign = 'left';
+      mapCtx.font = `bold ${fs}px Arial, Helvetica, sans-serif`;
+      mapCtx.fillText(TEXT, 20 * DPR, mapH / 2);
+
+      const step = Math.max(2, Math.floor(DOT_GAP * DPR));
+      const img = mapCtx.getImageData(0, 0, mapW, mapH).data;
+
+      dots = [];
+      for (let y = 0; y < mapH; y += step) {
+        for (let x = 0; x < mapW; x += step) {
+          const a = img[(y * mapW + x) * 4 + 3];
+          if (a > 128) {
+            // precompute hue across the text width
+            const h = (x / mapW) * 360;
+            dots.push({ x, y, h });
+          }
         }
       }
+
+      // start just off the left so it enters the panel moving right
+      scrollX = -mapW;
+      last = performance.now();
     }
 
-    // start just off the right so it enters moving left→right
-    scrollX = W;
-    last = performance.now();
-  }
+    function drawOneCopy(anchorX, anchorY) {
+      // Draw one copy of the dot text at anchorX, anchorY
+      for (let i = 0; i < dots.length; i++) {
+        const d = dots[i];
+        let px = anchorX + d.x;
+        let py = anchorY + d.y;
 
-  function drawOneCopy(anchorX, anchorY) {
-    for (let i = 0; i < dots.length; i++) {
-      const d = dots[i];
-      let px = anchorX + d.x;
-      let py = anchorY + d.y;
+        // pointer repel (instant displacement)
+        const dx = px - mouse.x;
+        const dy = py - mouse.y;
+        const dist = Math.hypot(dx, dy);
 
-      const dx = px - mouse.x;
-      const dy = py - mouse.y;
-      const dist = Math.hypot(dx, dy);
+        if (dist < REPEL_RADIUS) {
+          const t = (REPEL_RADIUS - dist) / REPEL_RADIUS;
+          const k = REPEL_PUSH * t;
+          const inv = dist > 0.0001 ? (1 / dist) : 0;
+          px += dx * inv * k;
+          py += dy * inv * k;
+        }
 
-      if (dist < REPEL_RADIUS) {
-        const t = (REPEL_RADIUS - dist) / REPEL_RADIUS;
-        const k = REPEL_PUSH * t;
-        const inv = dist > 0.0001 ? (1 / dist) : 0;
-        px += dx * inv * k;
-        py += dy * inv * k;
+        ctx.fillStyle = `hsl(${d.h}, 100%, 60%)`;
+        ctx.beginPath();
+        ctx.arc(px, py, DOT_SIZE * DPR, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    function frame(now) {
+      const dt = (now - last) / 1000;
+      last = now;
+
+      // advance scroll
+      scrollX += DIRECTION * SPEED * DPR * dt;
+
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, W, H);
+
+      const seg = mapW + LOOP_GAP * DPR;
+      const anchorY = (H - mapH) / 2;
+
+      // ensure we draw enough copies to cover the screen
+      let ax = scrollX;
+      while (ax > -mapW) ax -= seg;                // move start far enough left
+      for (; ax < W + seg; ax += seg) {
+        drawOneCopy(ax, anchorY);
       }
 
-      ctx.fillStyle = `hsl(${d.h}, 100%, 60%)`;
-      ctx.beginPath();
-      ctx.arc(px, py, DOT_SIZE * DPR, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  function frame(now) {
-    const dt = (now - last) / 1000;
-    last = now;
-
-    scrollX += DIRECTION * SPEED * DPR * dt;
-
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, W, H);
-
-    const seg = mapW + LOOP_GAP * DPR;
-    const anchorY = (H - mapH) / 2;
-
-    // Adjust for left-to-right coverage
-    let ax = scrollX;
-    while (ax < W) ax -= seg; // ensure starting point far enough right
-    for (; ax > -seg; ax -= seg) {
-      drawOneCopy(ax, anchorY);
+      requestAnimationFrame(frame);
     }
 
-    requestAnimationFrame(frame);
-  }
+    // Pointer handlers (mouse + touch)
+    window.addEventListener('mousemove', (e) => {
+      mouse.x = e.clientX * DPR;
+      mouse.y = e.clientY * DPR;
+      mouse.active = true;
+    }, { passive: true });
 
-  window.addEventListener('mousemove', (e) => {
-    mouse.x = e.clientX * DPR;
-    mouse.y = e.clientY * DPR;
-    mouse.active = true;
-  }, { passive: true });
+    window.addEventListener('mouseleave', () => {
+      mouse.x = -9999; mouse.y = -9999; mouse.active = false;
+    });
 
-  window.addEventListener('mouseleave', () => {
-    mouse.x = -9999; mouse.y = -9999; mouse.active = false;
-  });
+    window.addEventListener('touchmove', (e) => {
+      const t = e.touches[0];
+      if (!t) return;
+      mouse.x = t.clientX * DPR;
+      mouse.y = t.clientY * DPR;
+      mouse.active = true;
+    }, { passive: true });
 
-  window.addEventListener('touchmove', (e) => {
-    const t = e.touches[0];
-    if (!t) return;
-    mouse.x = t.clientX * DPR;
-    mouse.y = t.clientY * DPR;
-    mouse.active = true;
-  }, { passive: true });
+    window.addEventListener('resize', fitCanvas);
 
-  window.addEventListener('resize', fitCanvas);
+    // UI
+    document.getElementById('startBtn').onclick = () => {
+      document.getElementById('ui').style.display = 'none';
+      document.getElementById('hud').hidden = false;
+      music?.play().catch(() => {}); // if no file, ignore
+      fitCanvas();
+      requestAnimationFrame((t)=>{ last = t; frame(t); });
+    };
 
-  document.getElementById('startBtn').onclick = () => {
-    document.getElementById('ui').style.display = 'none';
-    document.getElementById('hud').hidden = false;
-    music?.play().catch(() => {});
-    fitCanvas();
-    requestAnimationFrame((t)=>{ last = t; frame(t); });
-  };
+    document.getElementById('toggleSound').onclick = () => {
+      if (!music) return;
+      if (music.paused) { music.play(); } else { music.pause(); }
+      document.getElementById('toggleSound').textContent = music.paused ? 'Unmute' : 'Mute';
+    };
 
-  document.getElementById('toggleSound').onclick = () => {
-    if (!music) return;
-    if (music.paused) { music.play(); } else { music.pause(); }
-    document.getElementById('toggleSound').textContent = music.paused ? 'Unmute' : 'Mute';
-  };
+    document.getElementById('faster').onclick = () => { SPEED = Math.min(600, SPEED + 40); };
+    document.getElementById('slower').onclick = () => { SPEED = Math.max(20, SPEED - 40); };
 
-  document.getElementById('faster').onclick = () => { SPEED = Math.min(600, SPEED + 40); };
-  document.getElementById('slower').onclick = () => { SPEED = Math.max(20, SPEED - 40); };
-</script>
+    // If the user has no audio file, still allow animation to run after Start.
+  </script>
+</body>
+</html>
