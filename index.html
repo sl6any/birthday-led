@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Happy Birthday To Me!!</title>
+  <meta name="description" content="LED-style birthday message with music." />
+  <style>
+    html, body { margin: 0; padding: 0; background: black; overflow: hidden; }
+    canvas { display: block; }
+    #startScreen {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.9); color: white; flex-direction: column;
+    }
+    button {
+      padding: 10px 20px; font-size: 18px; cursor: pointer; margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div id="startScreen">
+    <h1>Happy Birthday To Me!!</h1>
+    <p>Click start to play music and see the animation</p>
+    <button id="startBtn">Start</button>
+  </div>
+  <canvas id="c"></canvas>
+  <audio id="music" src="assets/music.mp3" loop></audio>
+
+  <script>
+    const canvas = document.getElementById("c");
+    const ctx = canvas.getContext("2d");
+    let w, h, text = "HAPPY BIRTHDAY TO ME!!";
+    let dots = [];
+    let mouse = {x: -9999, y: -9999};
+
+    function resize() {
+      w = canvas.width = window.innerWidth;
+      h = canvas.height = window.innerHeight;
+      makeDots();
+    }
+    window.addEventListener("resize", resize);
+    resize();
+
+    function makeDots() {
+      dots = [];
+      ctx.font = "bold 100px Arial";
+      ctx.fillStyle = "white";
+      ctx.textAlign = "center";
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillText(text, w / 2, h / 2);
+      const imgData = ctx.getImageData(0, 0, w, h);
+      for (let y = 0; y < h; y += 6) {
+        for (let x = 0; x < w; x += 6) {
+          if (imgData.data[(y * w + x) * 4 + 3] > 128) {
+            dots.push({x, y, baseX: x, baseY: y});
+          }
+        }
+      }
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, w, h);
+      dots.forEach(dot => {
+        let dx = dot.x - mouse.x;
+        let dy = dot.y - mouse.y;
+        let dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 80) {
+          let angle = Math.atan2(dy, dx);
+          dot.x += Math.cos(angle) * 5;
+          dot.y += Math.sin(angle) * 5;
+        } else {
+          dot.x += (dot.baseX - dot.x) * 0.05;
+          dot.y += (dot.baseY - dot.y) * 0.05;
+        }
+        ctx.fillStyle = `hsl(${(dot.baseX/w)*360}, 100%, 60%)`;
+        ctx.beginPath();
+        ctx.arc(dot.x, dot.y, 2, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      requestAnimationFrame(draw);
+    }
+
+    window.addEventListener("mousemove", e => {
+      mouse.x = e.clientX;
+      mouse.y = e.clientY;
+    });
+
+    document.getElementById("startBtn").onclick = () => {
+      document.getElementById("startScreen").style.display = "none";
+      document.getElementById("music").play();
+    };
+
+    makeDots();
+    draw();
+  </script>
+</body>
+</html>
